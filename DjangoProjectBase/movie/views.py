@@ -7,6 +7,11 @@ import matplotlib.pyplot as plt
 import matplotlib
 import io
 import urllib, base64
+from openai import OpenAI
+import numpy as np
+import os
+from dotenv import load_dotenv
+from django.views.decorators.csrf import csrf_protect
 
 def home(request):
     #return HttpResponse('<h1>Welcome to Home Page</h1>')
@@ -123,3 +128,46 @@ def generate_bar_chart(data, xlabel, ylabel):
     buffer.close()
     graphic = base64.b64encode(image_png).decode('utf-8')
     return graphic
+
+@csrf_protect
+def recommend_movie(request):
+    recommended_movie = None
+    similarity_score = None
+
+    if request.method == 'POST':
+        prompt = request.POST.get('prompt')
+        
+        # Cargar la API Key
+        load_dotenv('../openai_api_key.env')
+        client = OpenAI(api_key=os.environ.get('openai_apikey'))
+
+        # Generar embedding del prompt
+        response = client.embeddings.create(
+            input=[prompt],
+            model="text-embedding-3-small"
+        )
+        prompt_emb = np.array(response.data[0].embedding, dtype=np.float32)
+
+        # Función para calcular similitud de coseno
+        def cosine_similarity(a, b):
+            return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+        # Buscar la película más similar
+        best_movie = None
+        max_similarity = -1
+
+        for movie in Movie.objects.all():
+            movie_emb = np.frombuffer(movie.emb, dtype=np.float32)
+            similarity = cosine_similarity(prompt_emb, movie_emb)
+
+            if similarity > max_similarity:
+                max_similarity = similarity
+                best_movie = movie
+
+        recommended_movie = best_movie
+        similarity_score = max_similarity
+
+    return render(request, 'recommend.html', {
+        'recommended_movie': recommended_movie,
+        'similarity_score': similarity_score
+    })
